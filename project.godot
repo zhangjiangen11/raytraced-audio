@@ -15,9 +15,18 @@ run/main_scene="uid://dgx3qrieojg3x"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/icon="res://icon.svg"
 
+[audio]
+
+general/3d_panning_strength=1.0
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/raytraced_audio/plugin.cfg")
+
+[raytraced_audio]
+
+reverb_bus=&"RaytracedReverb"
+ambient_bus=&"RaytracedAmbient"
 
 [rendering]
 

@@ -45,6 +45,12 @@ func update():
 	# Escaped outside
 	if !is_colliding():
 		escaped = true
+		global_position += target_position
+		# Muffle ray: Check for line of sight with audio players
+		for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
+			var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
+			player.lowpass_rays_count += int(has_line_of_sight)
+
 		return
 
 	# Bounce
@@ -54,7 +60,7 @@ func update():
 	target_position = target_position.bounce(normal)
 	has_bounced_this_tick = true
 
-	# Lowpass filter ray: Check for line of sight with audio players
+	# Muffle ray: Check for line of sight with audio players
 	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
 		var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
 		player.lowpass_rays_count += int(has_line_of_sight)
@@ -64,13 +70,16 @@ func update():
 
 	# Echo ray: Check for line of light with listener
 	# Optimization: no need to raycast for first echo bounce
-	if bounces > 1 and !_cast_ray(owner.global_position).is_empty():
+	if bounces == 1:
+		echo_dist = hit_pos.distance_to(owner.global_position)
+		echo_count += 1
+		escape_dir = target_position.normalized()
 		return
-	# The way is clear -> echo
-	var dist: float = hit_pos.distance_to(owner.global_position)
-	echo_dist += dist
-	echo_count += 1
-	escape_dir = owner.global_position.direction_to(hit_pos)
+	if _cast_ray(owner.global_position).is_empty():
+		# The way is clear -> echo
+		echo_dist = hit_pos.distance_to(owner.global_position)
+		echo_count += 1
+		escape_dir = owner.global_position.direction_to(hit_pos)
 
 
 ## Return to the listener with a random direction
@@ -90,6 +99,7 @@ func reset():
 	reset_tick_stats()
 
 
+# Called after this ray is done ticking
 func reset_tick_stats() -> void:
 	has_bounced_this_tick = false
 	echo_dist = 0.0

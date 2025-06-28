@@ -1,22 +1,27 @@
-extends Node3D
+extends AudioListener3D
 
 ## TODO: documentation
 
 # TODO: debugging tools
+# TODO: make some members private
+# TODO: signals
 
 const SPEED_OF_SOUND: float = 343.0 # speed of sound in m/s
-
-const REVERB_BUS: StringName = &"RaytracedReverb"
-const AMBIENT_BUS: StringName = &"RaytracedAmbient"
+const GROUP_NAME: StringName = &"RaytracedAudioListener"
 
 const AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
 const RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
+const RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
+
+var rays: Array[AudioRay] = []
+
 
 @export var is_enabled: bool = true:
 	set(v):
 		if is_enabled == v:
 			return
 		is_enabled = v
+
 		if is_enabled:
 			setup()
 		else:
@@ -28,17 +33,30 @@ const RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/ray
 
 @export var rays_count: int = 4:
 	set(v):
-		rays_count = v
+		if v == rays_count:
+			return
+		rays_count = maxi(v, 1)
+		clear()
+		setup()
 
-@export var max_raycast_dist: float = SPEED_OF_SOUND
-@export var max_bounces: int = 3
+@export var max_raycast_dist: float = SPEED_OF_SOUND:
+	set(v):
+		max_raycast_dist = v
+		update_ray_configuration()
+@export var max_bounces: int = 3:
+	set(v):
+		max_bounces = v
+		update_ray_configuration()
 
 @export_category("Muffle")
+@export var muffle_enabled: bool = true
 @export var muffle_interpolation: float = 0.01
 @export_category("Echo")
+@export var echo_enabled: bool = true
 @export var echo_room_size_multiplier: float = 2.0
 @export var echo_interpolation: float = 0.01
 @export_category("Ambient")
+@export var ambient_enabled: bool = true
 @export var ambient_direction_interpolation: float = 0.02
 @export var ambient_volume_interpolation: float = 0.01
 @export var ambient_volume_attenuation: float = 0.998
@@ -47,49 +65,56 @@ var room_size: float = 0.0
 var ambience: float = 0.0
 var ambient_dir: Vector3 = Vector3.ZERO
 
+var _reverb_effect: AudioEffectReverb
+var _pan_effect: AudioEffectPanner
+
+
+func _enter_tree() -> void:
+	add_to_group(GROUP_NAME)
+
 
 func _ready() -> void:
+	# Reverb effect
+	var i: int = AudioServer.get_bus_index(ProjectSettings.get_setting("raytraced_audio/reverb_bus"))
+	if i == -1:
+		push_error("Failed to get reverb bus for raytraced audio. Disabling echo...")
+		# TODO: disable echo
+	else:
+		_reverb_effect = AudioServer.get_bus_effect(i, 0)
+
+	# Pan effect
+	i = AudioServer.get_bus_index(ProjectSettings.get_setting("raytraced_audio/ambient_bus"))
+	if i == -1:
+		push_error("Failed to get ambient bus for raytraced audio. Disabling echo...")
+		# TODO: disable ambient
+	else:
+		_pan_effect = AudioServer.get_bus_effect(i, 0)
+
 	if is_enabled:
 		setup()
+
+	set_process(auto_update)
+	if is_enabled:
+		make_current()
 
 	# TODO: debugging tools
 	# Performance.add_custom_monitor(&"raycast_audio/ambience", func(): return ambience)
 	# Performance.add_custom_monitor(&"raycast_audio/echo_room_size", func(): return room_size)
 	
-	set_process(auto_update)
 
 
 func setup() -> void:
-	_setup_audio_buses()
-
-	# Rays
 	for __ in rays_count:
 		var rc: AudioRay = AudioRay.new(max_raycast_dist, max_bounces)
-		add_child(rc)
-
-
-func _setup_audio_buses() -> void:
-	# Reverb
-	var i: int = AudioServer.bus_count
-	AudioServer.add_bus()
-	AudioServer.set_bus_name(i, REVERB_BUS)
-	AudioServer.set_bus_send(i, &"Master")
-	var r: AudioEffectReverb = AudioEffectReverb.new()
-	r.hipass = 1.0
-	AudioServer.add_bus_effect(i, r)
-
-	# Ambient
-	i = AudioServer.bus_count
-	AudioServer.add_bus()
-	AudioServer.set_bus_name(i, AMBIENT_BUS)
-	AudioServer.set_bus_send(i, &"Master")
-	AudioServer.add_bus_effect(i, AudioEffectPanner.new())
+		add_child(rc, INTERNAL_MODE_BACK)
+		rays.push_back(rc)
 
 
 func clear():
-	for ray: AudioRay in get_children():
+	for ray: AudioRay in rays:
 		remove_child(ray)
 		ray.queue_free()
+	rays.clear()
 
 
 func _process(delta: float) -> void:
@@ -100,7 +125,10 @@ func _process(delta: float) -> void:
 
 
 func update():
-	var echo: float = 0.0 # Avg echo from all tays
+	if !is_enabled:
+		return
+
+	var echo: float = 0.0 # Avg echo from all rays
 	var echo_count: int = 0 # Number of echo rays that came back
 	var bounces_this_tick: int = 0
 	var escaped_count: int = 0
@@ -108,7 +136,7 @@ func update():
 	var escaped_strength: float = 0.0
 
 	# Gather data
-	for ray: AudioRay in get_children():
+	for ray: AudioRay in rays:
 		ray.update()
 
 		echo += ray.echo_dist
@@ -125,55 +153,52 @@ func update():
 	echo = 0.0 if echo_count == 0 else (echo / float(echo_count))
 	escaped_dir = Vector3.ZERO if escaped_count == 0 else (escaped_dir / float(escaped_count))
 
-	_update_muffle(bounces_this_tick)
-	_update_echo(echo, echo_count, bounces_this_tick)
-	_update_ambient(escaped_strength, escaped_dir)
+	if muffle_enabled:
+		_update_muffle()
+	if echo_enabled:
+		_update_echo(echo, echo_count, bounces_this_tick)
+	if ambient_enabled:
+		_update_ambient(escaped_strength, escaped_dir)
 
 
-func _update_muffle(bounces: int) -> void:
+func _update_muffle() -> void:
 	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.GROUP_NAME):
-		player.update(global_position, bounces, muffle_interpolation)
+		player.update(global_position, rays_count, muffle_interpolation)
 
 
 func _update_echo(echo: float, echo_count: int, bounces: int) -> void:
-	# echo = echo / rays_count
-	var reverb: AudioEffectReverb = AudioServer.get_bus_effect(AudioServer.get_bus_index(REVERB_BUS), 0)
-
 	# Length -> echo delay
 	room_size = lerpf(room_size, echo, echo_interpolation)
 	var e: float = (room_size * echo_room_size_multiplier) / SPEED_OF_SOUND
 	# print("e = ", e)
-	reverb.room_size = lerpf(reverb.room_size, clampf(e, 0.0, 1.0), echo_interpolation)
-	reverb.predelay_msec = lerpf(reverb.predelay_msec, e * 1000, echo_interpolation)
-	reverb.predelay_feedback = lerpf(reverb.predelay_feedback, clampf(e, 0.0, 0.98), echo_interpolation)
+	_reverb_effect.room_size = lerpf(_reverb_effect.room_size, clampf(e, 0.0, 1.0), echo_interpolation)
+	_reverb_effect.predelay_msec = lerpf(_reverb_effect.predelay_msec, e * 1000, echo_interpolation)
+	_reverb_effect.predelay_feedback = lerpf(_reverb_effect.predelay_feedback, clampf(e, 0.0, 0.98), echo_interpolation)
 
 	# More rays % -> echo strength
 	var return_ratio: float = 0.0 if bounces == 0 else float(echo_count) / float(bounces)
-	reverb.hipass = lerpf(reverb.hipass, 1.0 - return_ratio, echo_interpolation)
-	# print("return_ratio = ", return_ratio)
-	# print("hipass = ", reverb.hipass)
+	_reverb_effect.hipass = lerpf(_reverb_effect.hipass, 1.0 - return_ratio, echo_interpolation)
 
 
 func _update_ambient(escaped_strength: float, escaped_dir: Vector3) -> void:
 	var ambience_ratio: float = float(escaped_strength) / float(rays_count)
-	var ambient_bus_idx: int = AudioServer.get_bus_index(AMBIENT_BUS)
 
 	# More rays % -> louder
 	if escaped_strength > 0:
 		ambience = lerpf(ambience, 1.0, ambience_ratio)
 	else:
 		ambience *= ambient_volume_attenuation
+	var ambient_bus_idx: int = AudioServer.get_bus_index(ProjectSettings.get_setting("raytraced_audio/ambient_bus"))
 	var volume: float = AudioServer.get_bus_volume_linear(ambient_bus_idx)
 	AudioServer.set_bus_volume_linear(ambient_bus_idx, lerpf(volume, ambience, ambient_volume_interpolation))
 	
 	# Avg escape direction -> pan
 	ambient_dir = ambient_dir.lerp(escaped_dir, ambient_direction_interpolation)
 	var target_pan: float = 0.0 if ambient_dir.is_zero_approx() else owner.transform.basis.x.dot(ambient_dir.normalized())
-	var pan: AudioEffectPanner = AudioServer.get_bus_effect(ambient_bus_idx, 0)
-	pan.pan = target_pan
+	_pan_effect.pan = target_pan
 
 
-func _update_ray_configuration() -> void:
-	for ray: AudioRay in get_children():
+func update_ray_configuration() -> void:
+	for ray: AudioRay in rays:
 		ray.cast_dist = max_raycast_dist
 		ray.max_bounces = max_bounces

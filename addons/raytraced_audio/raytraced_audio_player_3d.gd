@@ -27,6 +27,8 @@ func _enter_tree() -> void:
 	add_to_group(GROUP_NAME)
 
 func _ready() -> void:
+	bus = ProjectSettings.get_setting("raytraced_audio/reverb_bus") # Fallback
+
 	# Max distance not configured
 	if max_distance == 0.0:
 		max_distance = calculate_audible_distance_threshold()
@@ -40,7 +42,6 @@ func enable():
 	var i: int = _create_bus()
 	bus = AudioServer.get_bus_name(i)
 	add_to_group(ENABLED_GROUP_NAME)
-	print("enabled!")
 
 	# if DEBUG:
 	# 	DebugLabel.new(self, str(name, " (RaytracedAudioPlayer3D)"))\
@@ -49,7 +50,7 @@ func enable():
 func disable():
 	if !_is_enabled:
 		return
-	assert(bus != RaytracedAudioListener.REVERB_BUS)
+	assert(bus != ProjectSettings.get_setting("raytraced_audio/reverb_bus"))
 	
 	var idx: int = AudioServer.get_bus_index(bus)
 	if idx == -1:
@@ -61,7 +62,7 @@ func disable():
 
 func _disable():
 	_is_enabled = false
-	bus = RaytracedAudioListener.REVERB_BUS # Fallback
+	bus = ProjectSettings.get_setting("raytraced_audio/reverb_bus") # Fallback
 	remove_from_group(ENABLED_GROUP_NAME)
 	lowpass_rays_count = 0
 
@@ -74,7 +75,7 @@ func _create_bus() -> int:
 	var i: int = AudioServer.bus_count
 	AudioServer.add_bus()
 	AudioServer.set_bus_name(i, generate_bus_name())
-	AudioServer.set_bus_send(i, RaytracedAudioListener.REVERB_BUS)
+	AudioServer.set_bus_send(i, ProjectSettings.get_setting("raytraced_audio/reverb_bus"))
 	AudioServer.add_bus_effect(i, AudioEffectLowPassFilter.new())
 	return i
 
@@ -84,22 +85,9 @@ func generate_bus_name() -> String:
 func is_enabled() -> bool:
 	return _is_enabled
 
-func update(listener_pos: Vector3, total_bounces: int, interpolation: float) -> void:
+func update(listener_pos: Vector3, rays_count: int, interpolation: float) -> void:
 	if _is_enabled:
-		var idx: int = AudioServer.get_bus_index(bus)
-		if idx == -1:
-			push_warning("audio bus ", bus, " not found")
-			_disable()
-		else:
-			var ratio: float = 0.0 if total_bounces == 0 else float(lowpass_rays_count) / float(total_bounces)
-			var lowpass: AudioEffectLowPassFilter = AudioServer.get_bus_effect(idx, 0)
-
-			# Frequencies aren't linear, they scale logarithmically (log2 space; +1 octave = 2x the frequency)
-			# So we scale frequencies down before lerping, then scale them back up
-			var log_t: float = lerpf(LOG_MIN_HZ, LOG_MAX_HZ, ratio)
-			var log_hz: float = log(lowpass.cutoff_hz) / LOG2 # Scale current frequency down: ln(x) / ln(2) = log2(x)
-			log_hz = lerpf(log_hz, log_t, interpolation) # Lerp in scaled down space
-			lowpass.cutoff_hz = pow(2, log_hz) # Scale back up
+		_update(rays_count, interpolation)
 
 	lowpass_rays_count = 0
 	
@@ -109,6 +97,23 @@ func update(listener_pos: Vector3, total_bounces: int, interpolation: float) -> 
 		disable()
 	else:
 		enable()
+
+
+func _update(rays_count: int, interpolation: float):
+	var idx: int = AudioServer.get_bus_index(bus)
+	if idx == -1:
+		push_error("audio bus ", bus, " not found")
+		_disable()
+	else:
+		var ratio: float = float(lowpass_rays_count) / float(rays_count)
+		var lowpass: AudioEffectLowPassFilter = AudioServer.get_bus_effect(idx, 0)
+
+		# Frequencies aren't linear, they scale logarithmically (log2 space; +1 octave = 2x the frequency)
+		# So we scale frequencies down before lerping, then scale them back up
+		var log_t: float = lerpf(LOG_MIN_HZ, LOG_MAX_HZ, ratio)
+		var log_hz: float = log(lowpass.cutoff_hz) / LOG2 # Scale current frequency down: ln(x) / ln(2) = log2(x)
+		log_hz = lerpf(log_hz, log_t, interpolation) # Lerp in scaled down space
+		lowpass.cutoff_hz = pow(2, log_hz) # Scale back up
 
 
 func get_volume_db_from_pos(from_pos: Vector3) -> float:
@@ -151,5 +156,5 @@ func calculate_audible_distance_threshold() -> float:
 		ATTENUATION_DISABLED:
 			return 0.0
 		_:
-			push_error("Unknown attenuation type: '", attenuation_model, "'")
+			push_error("Unknown attenuation model: '", attenuation_model, "'")
 			return 0.0
