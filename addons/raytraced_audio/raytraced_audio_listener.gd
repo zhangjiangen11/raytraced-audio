@@ -13,6 +13,11 @@ const AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
 const RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
 const RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
 
+enum RayScatterModel {
+	RANDOM,
+	XZ,
+}
+
 var rays: Array[AudioRay] = []
 
 
@@ -48,6 +53,11 @@ var rays: Array[AudioRay] = []
 		max_bounces = v
 		update_ray_configuration()
 
+@export var ray_scatter_model: RayScatterModel = RayScatterModel.RANDOM:
+	set(v):
+		ray_scatter_model = v
+		update_ray_configuration()
+
 @export_category("Muffle")
 @export var muffle_enabled: bool = true
 @export var muffle_interpolation: float = 0.01
@@ -78,15 +88,15 @@ func _ready() -> void:
 	var i: int = AudioServer.get_bus_index(ProjectSettings.get_setting("raytraced_audio/reverb_bus"))
 	if i == -1:
 		push_error("Failed to get reverb bus for raytraced audio. Disabling echo...")
-		# TODO: disable echo
+		echo_enabled = false
 	else:
 		_reverb_effect = AudioServer.get_bus_effect(i, 0)
 
 	# Pan effect
 	i = AudioServer.get_bus_index(ProjectSettings.get_setting("raytraced_audio/ambient_bus"))
 	if i == -1:
-		push_error("Failed to get ambient bus for raytraced audio. Disabling echo...")
-		# TODO: disable ambient
+		push_error("Failed to get ambient bus for raytraced audio. Disabling ambience...")
+		ambient_enabled = false
 	else:
 		_pan_effect = AudioServer.get_bus_effect(i, 0)
 
@@ -106,6 +116,7 @@ func _ready() -> void:
 func setup() -> void:
 	for __ in rays_count:
 		var rc: AudioRay = AudioRay.new(max_raycast_dist, max_bounces)
+		rc.set_scatter_model(ray_scatter_model)
 		add_child(rc, INTERNAL_MODE_BACK)
 		rays.push_back(rc)
 
@@ -202,3 +213,4 @@ func update_ray_configuration() -> void:
 	for ray: AudioRay in rays:
 		ray.cast_dist = max_raycast_dist
 		ray.max_bounces = max_bounces
+		ray.set_scatter_model(ray_scatter_model)
