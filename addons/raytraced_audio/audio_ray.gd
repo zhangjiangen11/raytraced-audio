@@ -1,7 +1,11 @@
 extends RayCast3D
 
-const RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
-const RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
+# dont you worry about this class, habibi
+# shhhhhh its okay
+# ( -  ͜ʖ -)☞(ʘ_ʘ; )
+
+const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
+const _RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
 
 var cast_dist: float = 0.0
 var max_bounces: int = 1
@@ -26,7 +30,7 @@ func _init(raycast_dist: float, max_bounce_count: int) -> void:
 
 func _enter_tree() -> void:
 	owner = get_parent()
-	assert(owner is RaytracedAudioListener)
+	assert(owner is _RaytracedAudioListener)
 
 
 func _ready() -> void:
@@ -48,9 +52,9 @@ func update():
 		escaped = true
 		global_position += target_position
 		# Muffle ray: Check for line of sight with audio players
-		for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
+		for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
 			var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
-			player.lowpass_rays_count += int(has_line_of_sight)
+			player._lowpass_rays_count += int(has_line_of_sight)
 		return
 
 	# Bounce
@@ -61,9 +65,9 @@ func update():
 	has_bounced_this_tick = true
 
 	# Muffle ray: Check for line of sight with audio players
-	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
+	for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
 		var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
-		player.lowpass_rays_count += int(has_line_of_sight)
+		player._lowpass_rays_count += int(has_line_of_sight)
 		# Same as:
 		# if has_line_of_sight:
 		# 	player.lowpass_rays_count += 1
@@ -81,7 +85,7 @@ func update():
 		escape_dir = owner.global_position.direction_to(hit_pos)
 
 
-## Return to the listener with a random direction
+# Return to the listener with a random direction
 func reset():
 	var dir: Vector3 = ray_scatter.call()
 	
@@ -101,11 +105,11 @@ func reset_tick_stats() -> void:
 	echo_count = 0
 
 
-func set_scatter_model(model: RaytracedAudioListener.RayScatterModel) -> void:
+func set_scatter_model(model: _RaytracedAudioListener.RayScatterModel) -> void:
 	match model:
-		RaytracedAudioListener.RayScatterModel.RANDOM:
+		_RaytracedAudioListener.RayScatterModel.RANDOM:
 			ray_scatter = _random_dir
-		RaytracedAudioListener.RayScatterModel.XZ:
+		_RaytracedAudioListener.RayScatterModel.XZ:
 			ray_scatter = _random_dir_xz_plane
 		_:
 			push_error("Unknown ray scatter model: '", model, "'")
@@ -130,8 +134,4 @@ func _random_dir() -> Vector3:
 	var theta: float = randf_range(0.0, TAU)
 	var y: float = randf_range(-1.0, 1.0)
 	var k: float = sqrt(1.0 - y*y)
-	return Vector3(
-		k * cos(theta),
-		k * sin(theta),
-		y
-	)
+	return Vector3(k * cos(theta), k * sin(theta), y)

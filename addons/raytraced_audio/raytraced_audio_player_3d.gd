@@ -1,40 +1,60 @@
 extends AudioStreamPlayer3D
+## Audio stream player that allows for audio muffling
+## 
+## You can already use the reverb and ambient audio buses (see the documentation for [RaytracedAudioListener] for more details)
+## to make use of raytraced audio effects, but using [RaytracedAudioPlayer3D]s allows you to use more capabilities.
+## Namely, muffling sounds behind walls.
+## [br]
+## [br][b][color=yellow]Warning[/color][/b]: [RaytracedAudioPlayer3D]s will default to using the reverb audio bus
+## [br]If you wish to use another bus instead, please set it after this node has been added to the scene tree (i.e. after [code]_enter_tree()[/code])
+## [br]
+## [br][i]Technical note[/i]:
+## [br]Currently, there is no way to muffle only one audio player (or apply any effect for that matter)
+## [br]So we create a new bus for every audio player that is audible from the [RaytracedAudioListener]
+## [br]Godot doesn't provide methods to calculate the volume of an audio at certain distances, so we calculate
+## [br]that ourselves (see calculate_audible_distance_threshold())
 
-## Currently, there is no way to muffle only one audio player (or apply any effect for that matter)
-## So we create a new bus for every audio player that is audible from the RaytracedAudioListener
-## Godot doesn't provide methods to calculate the volume of an audio at certain distances, so we calculate
-## that ourselves (see calculate_audible_distance_threshold())
+const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
 
-const RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
-
+## All [RaytracedAudioPlayer3D]s (regardless of state) will be in this group
 const GROUP_NAME: StringName = &"raytraced_audio_player_3d"
+## All [b]enabled[/b] [RaytracedAudioPlayer3D]s will be in this group
 const ENABLED_GROUP_NAME: StringName = &"enabled_raytraced_audio_player_3d"
-const CMP_EPSILON: float = 0.0001
+## The lowpass frequency when completely muffled
 const LOWPASS_MIN_HZ: float = 250.0
+## The lowpass frequency when completely not-muffled (?)
 const LOWPASS_MAX_HZ: float = 20000.0
 
+## Used in internal calculations
 const LOG2: float = log(2.0)
+## Used in internal calculations
 const LOG_MIN_HZ: float = log(LOWPASS_MIN_HZ) / LOG2
+## Used in internal calculations
 const LOG_MAX_HZ: float = log(LOWPASS_MAX_HZ) / LOG2
 
+## The threshold (in decibels) at which sounds will be considered inaudible
+## [br]This is used to enable / disable this node when it's not audible to save resources
+## [br]The distance at which this node is no longer considered audible is stored inside [member max_distance] (if not already set), also to save resources
 @export var audibility_threshold_db: float = -30.0
 
-var lowpass_rays_count: int = 0
+var _lowpass_rays_count: int = 0
 var _is_enabled: bool = false
 
 
 func _enter_tree() -> void:
 	add_to_group(GROUP_NAME)
-
-func _ready() -> void:
 	bus = ProjectSettings.get_setting("raytraced_audio/reverb_bus") # Fallback
 
+func _ready() -> void:
 	# Max distance not configured
 	if max_distance == 0.0:
 		max_distance = calculate_audible_distance_threshold()
 		print("[", name, " (RaytracedAudioPlayer3D)] calculated max distance = ", max_distance)
 
 
+## Enables this node
+## [br]Note: you should almost never have to worry about enabling / disabling [RaytracedAudioPlayer3D]s manually
+## [br]See [member update]
 func enable():
 	if _is_enabled:
 		return
@@ -47,6 +67,9 @@ func enable():
 	# 	DebugLabel.new(self, str(name, " (RaytracedAudioPlayer3D)"))\
 	# 		.with_name_replace("debuglabel")
 
+## Enables this node
+## [br]Note: you should almost never have to worry about enabling / disabling [RaytracedAudioPlayer3D]s manually
+## [br]See [member update]
 func disable():
 	if !_is_enabled:
 		return
@@ -64,13 +87,13 @@ func _disable():
 	_is_enabled = false
 	bus = ProjectSettings.get_setting("raytraced_audio/reverb_bus") # Fallback
 	remove_from_group(ENABLED_GROUP_NAME)
-	lowpass_rays_count = 0
+	_lowpass_rays_count = 0
 
 	# if DEBUG:
 	# 	DebugLabel.remove_label(self, "debuglabel")
 
 
-## Returns the index of the created bus
+# Returns the index of the created bus
 func _create_bus() -> int:
 	var i: int = AudioServer.bus_count
 	AudioServer.add_bus()
@@ -79,20 +102,26 @@ func _create_bus() -> int:
 	AudioServer.add_bus_effect(i, AudioEffectLowPassFilter.new())
 	return i
 
+## Returns a name for the audio bus created for this node
 func generate_bus_name() -> String:
 	return str("RTAudioPlayer3D_", name, randi())
 
+## ✨ the name says it all ✨
 func is_enabled() -> bool:
 	return _is_enabled
 
-func update(listener_pos: Vector3, rays_count: int, interpolation: float) -> void:
+## Updates this [RaytracedAudioPlayer3D]
+## [br]This method will adjust the muffle of the played stream, as well as enable or disable it
+## based on whether it's audible from the given [RaytracedAudioListener]
+## [br]If you are updating this node manually, this is the method to call
+func update(listener: _RaytracedAudioListener) -> void:
 	if _is_enabled:
-		_update(rays_count, interpolation)
+		_update(listener.rays_count, listener.muffle_interpolation)
 
-	lowpass_rays_count = 0
+	_lowpass_rays_count = 0
 	
 	# Enable based on position
-	var dist_sq: float = global_position.distance_squared_to(listener_pos)
+	var dist_sq: float = global_position.distance_squared_to(listener.global_position)
 	if dist_sq > max_distance*max_distance or !playing:
 		disable()
 	else:
@@ -105,18 +134,23 @@ func _update(rays_count: int, interpolation: float):
 		push_error("audio bus ", bus, " not found")
 		_disable()
 	else:
-		var ratio: float = float(lowpass_rays_count) / float(rays_count)
+		var ratio: float = float(_lowpass_rays_count) / float(rays_count)
 		var lowpass: AudioEffectLowPassFilter = AudioServer.get_bus_effect(idx, 0)
 
-		# Frequencies aren't linear, they scale logarithmically (log2 space; +1 octave = 2x the frequency)
+		# Frequencies aren't linear, they scale logarithmically (log2 space) +1 octave = 2x the frequency
 		# So we scale frequencies down before lerping, then scale them back up
 		var log_t: float = lerpf(LOG_MIN_HZ, LOG_MAX_HZ, ratio)
-		var log_hz: float = log(lowpass.cutoff_hz) / LOG2 # Scale current frequency down: ln(x) / ln(2) = log2(x)
+		var log_hz: float = log(lowpass.cutoff_hz) / LOG2 # Scale current frequency down:  log2(x) = ln(x) / ln(2)
 		log_hz = lerpf(log_hz, log_t, interpolation) # Lerp in scaled down space
 		lowpass.cutoff_hz = pow(2, log_hz) # Scale back up
 
 
+# Translated from the godot repo
+## Calculates the volume (in decibels) of the audio stream from the given position
+## [br]Please note that the final volume will vary depending on the stream that is being played
 func get_volume_db_from_pos(from_pos: Vector3) -> float:
+	const CMP_EPSILON: float = 0.0001
+
 	var dist: float = from_pos.distance_to(global_position)
 	var vol: float = 0.0
 	match attenuation_model:
@@ -135,11 +169,12 @@ func get_volume_db_from_pos(from_pos: Vector3) -> float:
 	return vol
 
 
-func is_audible(from_pos: Vector3) -> bool:
-	return get_volume_db_from_pos(from_pos) >= audibility_threshold_db
-
-
+## Calculates the distance at which this [RaytracedAudioPlayer3D] is no longer considered audible
+## [br]See also [member audibility_threshold_db]
 func calculate_audible_distance_threshold() -> float:
+	if max_distance > 0.0:
+		return max_distance
+	
 	match attenuation_model:
 		ATTENUATION_INVERSE_DISTANCE:
 			var t_lin: float = db_to_linear(audibility_threshold_db - volume_db)
@@ -158,3 +193,11 @@ func calculate_audible_distance_threshold() -> float:
 		_:
 			push_error("Unknown attenuation model: '", attenuation_model, "'")
 			return 0.0
+
+
+## Checks wheter this [RaytracedAudioPlayer3D] is considered audible from the given position
+## [br]See also [member audibility_threshold_db]
+func is_audible(from_pos: Vector3) -> bool:
+	return get_volume_db_from_pos(from_pos) >= audibility_threshold_db
+
+

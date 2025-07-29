@@ -1,41 +1,62 @@
 extends AudioListener3D
-
-## TODO: documentation
+## 3D audio listener for raytraced audio
+##
+## Note: There should be only one [RaytracedAudioListener] in a given scene.
+## [br]This plugin creates 2 new audio buses for you to use across your project:
+## a [i]"Reverb"[/i] bus, and an [i]"Ambient"[/i] bus.
+## [br]Note: both buses' names can be changed under [code]Project Settings > Raytraced Audio[/code].
+## [br]
+## [br]The reverb bus controls echo / reverb.
+## [br]For example, there will be a much bigger reverb in large enclosed rooms compared to small ones, or outside in the open
+## [br]
+## [br]The ambient bus controls the strength and pan of sounds coming from outside.
+## [br]For example, in a room with a single opening leading outisde, sounds in this bus will appear to come from that opening, and will fade based on the player's distance to it
 
 # TODO: debugging tools
 # TODO: make some members private
 # TODO: signals
 
-const SPEED_OF_SOUND: float = 343.0 # speed of sound in m/s
-const GROUP_NAME: StringName = &"RaytracedAudioListener"
+## Speed of sound in m/s
+const SPEED_OF_SOUND: float = 343.0
+## All [RaytracedAudioListener]s will be in this group
+const GROUP_NAME: StringName = &"raytraced_audio_listener"
 
-const AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
-const RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
-const RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
+const _AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
+const _RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
+const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
 
 enum RayScatterModel {
+	## Rays will be shot out in a random 3d direction
 	RANDOM,
+	## Rays will be shot out on the listener's XZ plane (i.e. [code]Vector3(random, 0, random)[/code])
 	XZ,
 }
 
-var rays: Array[AudioRay] = []
+## List of rays instanced by this node
+var rays: Array[_AudioRay] = []
 
-
+## Enable or disable raycasting
 @export var is_enabled: bool = true:
 	set(v):
 		if is_enabled == v:
 			return
 		is_enabled = v
 
-		if is_enabled:
-			setup()
-		else:
-			clear()
+		if is_node_ready():
+			if is_enabled:
+				setup()
+			else:
+				clear()
+## Whether to update automatically
+## [br]If set to [code]true[/code], this [RaytracedAudioListener] will update every [i]process[/i] frame
 @export var auto_update: bool = true:
 	set(v):
 		auto_update = v
 		set_process(auto_update)
 
+## Number of rays to use
+## [br]More rays and more bounces mean a more accurate model of the environment can be made
+## [br] See also [member max_bounces]
 @export var rays_count: int = 4:
 	set(v):
 		if v == rays_count:
@@ -44,35 +65,67 @@ var rays: Array[AudioRay] = []
 		clear()
 		setup()
 
+## The maximum distance which any given ray instanced by this node will cast
 @export var max_raycast_dist: float = SPEED_OF_SOUND:
 	set(v):
 		max_raycast_dist = v
 		update_ray_configuration()
+## [br]More rays and more bounces mean a more accurate model of the environment can be made
+## [br] See also [member rays_count]
 @export var max_bounces: int = 3:
 	set(v):
 		max_bounces = v
 		update_ray_configuration()
 
+## Controls how rays will be instanced
 @export var ray_scatter_model: RayScatterModel = RayScatterModel.RANDOM:
 	set(v):
 		ray_scatter_model = v
 		update_ray_configuration()
 
 @export_category("Muffle")
+## Enables [RaytracedAudioPlayer3D]s muffling behind walls
 @export var muffle_enabled: bool = true
-@export var muffle_interpolation: float = 0.01
+## The interpolation strength of the muffle
+## [br]See [member muffle_enabled]
+@export_range(0.0, 1.0, 0.01) var muffle_interpolation: float = 0.01
 @export_category("Echo")
+## Enables updates to the reverb audio bus
+## [br]See [code]Project Settings > Raytraced Audio > Reverb Bus[/code]
 @export var echo_enabled: bool = true
+## The "intensity" of the reverb
+## [br]More specifically, multiplies the reverb's room size by this amount
+## [br]The default is [code]2.0[/code] to account for sound waves coming back to the listener after hitting a wall
 @export var echo_room_size_multiplier: float = 2.0
-@export var echo_interpolation: float = 0.01
+## The interpolation strength of the echo
+## [br]See [member echo_enabled]
+@export_range(0.0, 1.0, 0.01) var echo_interpolation: float = 0.01
 @export_category("Ambient")
+## Enables updates to the ambient audio bus
+## [br]See [code]Project Settings > Raytraced Audio > Ambient Bus[/code]
 @export var ambient_enabled: bool = true
-@export var ambient_direction_interpolation: float = 0.02
+## The interpolation strength of ambient sounds' direction (pan)
+## [br]See [member ambient_enabled], [member ambient_pan_strength]
+@export_range(0.0, 1.0, 0.01) var ambient_pan_interpolation: float = 0.02
+## How strong the pan between right and left ear will be
+## Setting this to 0 disables panning completely
+## [br]See [member ambient_enabled], [member ambient_pan_interpolation]
+@export_range(0.0, 1.0, 0.01) var ambient_pan_strength: float = 1.0
+## The interpolation strength of ambient sounds' volume
+## [br]See [member ambient_enabled]
 @export var ambient_volume_interpolation: float = 0.01
-@export var ambient_volume_attenuation: float = 0.998
+## How smoothly the ambient sounds will fade away when the [AudioListener3D] is no longer "outside"
+## Values close to 1 will make sounds linger for longer, while values close to 0 will make them drop suddenly
+## [br]See [member ambient_enabled]
+@export_range(0.0, 1.0, 0.001) var ambient_volume_attenuation: float = 0.998
 
+## The size of the room based on data gathered from rays, in world units
+## [br]Used in reverb calculation
 var room_size: float = 0.0
+## How "outside" this [RaytracedAudioListener] is based on data gathered from rays, between 0 and 1
 var ambience: float = 0.0
+## The direction to "outside" based on data gathered from rays
+## Should average out to 0 when this [RaytracedAudioListener] is completely outside
 var ambient_dir: Vector3 = Vector3.ZERO
 
 var _reverb_effect: AudioEffectReverb
@@ -113,16 +166,18 @@ func _ready() -> void:
 	
 
 
+## Initiates this [RaytracedAudioListener]'s rays
 func setup() -> void:
 	for __ in rays_count:
-		var rc: AudioRay = AudioRay.new(max_raycast_dist, max_bounces)
+		var rc: _AudioRay = _AudioRay.new(max_raycast_dist, max_bounces)
 		rc.set_scatter_model(ray_scatter_model)
 		add_child(rc, INTERNAL_MODE_BACK)
 		rays.push_back(rc)
 
 
+## Clears all created rays
 func clear():
-	for ray: AudioRay in rays:
+	for ray: _AudioRay in rays:
 		remove_child(ray)
 		ray.queue_free()
 	rays.clear()
@@ -135,6 +190,8 @@ func _process(delta: float) -> void:
 	update()
 
 
+## Updates this [RaytracedAudioListener]
+## [br]If you are updating this node manually (i.e. [member auto_update] is [code]false[/code]), this is the method to call
 func update():
 	if !is_enabled:
 		return
@@ -147,7 +204,7 @@ func update():
 	var escaped_strength: float = 0.0
 
 	# Gather data
-	for ray: AudioRay in rays:
+	for ray: _AudioRay in rays:
 		ray.update()
 
 		echo += ray.echo_dist
@@ -173,8 +230,8 @@ func update():
 
 
 func _update_muffle() -> void:
-	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.GROUP_NAME):
-		player.update(global_position, rays_count, muffle_interpolation)
+	for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.GROUP_NAME):
+		player.update(self)
 
 
 func _update_echo(echo: float, echo_count: int, bounces: int) -> void:
@@ -204,13 +261,16 @@ func _update_ambient(escaped_strength: float, escaped_dir: Vector3) -> void:
 	AudioServer.set_bus_volume_linear(ambient_bus_idx, lerpf(volume, ambience, ambient_volume_interpolation))
 	
 	# Avg escape direction -> pan
-	ambient_dir = ambient_dir.lerp(escaped_dir, ambient_direction_interpolation)
+	ambient_dir = ambient_dir.lerp(escaped_dir, ambient_pan_interpolation)
 	var target_pan: float = 0.0 if ambient_dir.is_zero_approx() else owner.transform.basis.x.dot(ambient_dir.normalized())
-	_pan_effect.pan = target_pan
+	_pan_effect.pan = target_pan * ambient_pan_strength
 
 
+# ✨ the name says it all ✨
 func update_ray_configuration() -> void:
-	for ray: AudioRay in rays:
+	for ray: _AudioRay in rays:
 		ray.cast_dist = max_raycast_dist
 		ray.max_bounces = max_bounces
 		ray.set_scatter_model(ray_scatter_model)
+
+
