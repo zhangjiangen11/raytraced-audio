@@ -1,4 +1,4 @@
-extends AudioStreamPlayer3D
+class_name RaytracedAudioPlayer3D extends AudioStreamPlayer3D
 ## Audio stream player that allows for audio muffling
 ## 
 ## You can already use the reverb and ambient audio buses (see the documentation for [RaytracedAudioListener] for more details)
@@ -9,12 +9,10 @@ extends AudioStreamPlayer3D
 ## [br]If you wish to use another bus instead, please set it after this node has been added to the scene tree (i.e. after [code]_enter_tree()[/code])
 ## [br]
 ## [br][i]Technical note[/i]:
-## [br]Currently, there is no way to muffle only one audio player (or apply any effect for that matter)
+## [br]Currently, there is no way to muffle only one audio player (or apply any effect for that matter).
 ## [br]So we create a new bus for every audio player that is audible from the [RaytracedAudioListener]
 ## [br]Godot doesn't provide methods to calculate the volume of an audio at certain distances, so we calculate
-## [br]that ourselves (see calculate_audible_distance_threshold())
-
-const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
+## that ourselves (see [member calculate_audible_distance_threshold()])
 
 ## All [RaytracedAudioPlayer3D]s (regardless of state) will be in this group
 const GROUP_NAME: StringName = &"raytraced_audio_player_3d"
@@ -32,10 +30,28 @@ const LOG_MIN_HZ: float = log(LOWPASS_MIN_HZ) / LOG2
 ## Used in internal calculations
 const LOG_MAX_HZ: float = log(LOWPASS_MAX_HZ) / LOG2
 
+## Emitted when this node is enabled
+## [br]See also [constant ENABLED_GROUP_NAME]
+signal enabled
+## Emitted when this node is disabled
+signal disabled
+## Emitted when the maximum audible distance for this node is changed
+## [br]See also [member AudioStreamPlayer3D.max_distance] and [member audibility_threshold_db]
+signal audible_distance_updated(distance: float)
+
 ## The threshold (in decibels) at which sounds will be considered inaudible
 ## [br]This is used to enable / disable this node when it's not audible to save resources
-## [br]The distance at which this node is no longer considered audible is stored inside [member max_distance] (if not already set), also to save resources
-@export var audibility_threshold_db: float = -30.0
+## [br]The distance at which this node is no longer considered audible is automatically stored inside [member AudioStreamPlayer3D.max_distance]
+## (if not already set), also to save resources
+## [br]Though, setting [member AudioStreamPlayer3D.max_distance] doesn't update this field automatically
+## [br]See also [member get_volume_db_from_pos] and [member calculate_audible_distance_threshold]
+@export var audibility_threshold_db: float = -30.0:
+	set(v):
+		audibility_threshold_db = v
+		# Max distance not configured
+		if is_node_ready() and max_distance == 0.0:
+			max_distance = calculate_audible_distance_threshold()
+			audible_distance_updated.emit(max_distance)
 
 var _lowpass_rays_count: int = 0
 var _is_enabled: bool = false
@@ -49,7 +65,7 @@ func _ready() -> void:
 	# Max distance not configured
 	if max_distance == 0.0:
 		max_distance = calculate_audible_distance_threshold()
-		print("[", name, " (RaytracedAudioPlayer3D)] calculated max distance = ", max_distance)
+		audible_distance_updated.emit(max_distance)
 
 
 ## Enables this node
@@ -62,6 +78,8 @@ func enable():
 	var i: int = _create_bus()
 	bus = AudioServer.get_bus_name(i)
 	add_to_group(ENABLED_GROUP_NAME)
+
+	enabled.emit()
 
 	# if DEBUG:
 	# 	DebugLabel.new(self, str(name, " (RaytracedAudioPlayer3D)"))\
@@ -89,6 +107,8 @@ func _disable():
 	remove_from_group(ENABLED_GROUP_NAME)
 	_lowpass_rays_count = 0
 
+	disabled.emit()
+
 	# if DEBUG:
 	# 	DebugLabel.remove_label(self, "debuglabel")
 
@@ -114,7 +134,7 @@ func is_enabled() -> bool:
 ## [br]This method will adjust the muffle of the played stream, as well as enable or disable it
 ## based on whether it's audible from the given [RaytracedAudioListener]
 ## [br]If you are updating this node manually, this is the method to call
-func update(listener: _RaytracedAudioListener) -> void:
+func update(listener: RaytracedAudioListener) -> void:
 	if _is_enabled:
 		_update(listener.rays_count, listener.muffle_interpolation)
 
@@ -199,5 +219,6 @@ func calculate_audible_distance_threshold() -> float:
 ## [br]See also [member audibility_threshold_db]
 func is_audible(from_pos: Vector3) -> bool:
 	return get_volume_db_from_pos(from_pos) >= audibility_threshold_db
+
 
 

@@ -1,8 +1,7 @@
-extends AudioListener3D
+class_name RaytracedAudioListener extends AudioListener3D
 ## 3D audio listener for raytraced audio
 ##
-## Note: There should be only one [RaytracedAudioListener] in a given scene.
-## [br]This plugin creates 2 new audio buses for you to use across your project:
+## This plugin creates 2 new audio buses for you to use across your project:
 ## a [i]"Reverb"[/i] bus, and an [i]"Ambient"[/i] bus.
 ## [br]Note: both buses' names can be changed under [code]Project Settings > Raytraced Audio[/code].
 ## [br]
@@ -11,19 +10,18 @@ extends AudioListener3D
 ## [br]
 ## [br]The ambient bus controls the strength and pan of sounds coming from outside.
 ## [br]For example, in a room with a single opening leading outisde, sounds in this bus will appear to come from that opening, and will fade based on the player's distance to it
+## [br]
+## [br]Note: There should be only one [RaytracedAudioListener] in a given scene.
+## [br]See also [RaytracedAudioPlayer3D]
 
 # TODO: debugging tools
-# TODO: make some members private
-# TODO: signals
 
 ## Speed of sound in m/s
 const SPEED_OF_SOUND: float = 343.0
 ## All [RaytracedAudioListener]s will be in this group
 const GROUP_NAME: StringName = &"raytraced_audio_listener"
 
-const _AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
-const _RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
-const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
+const AudioRay: Script = preload("res://addons/raytraced_audio/audio_ray.gd")
 
 enum RayScatterModel {
 	## Rays will be shot out in a random 3d direction
@@ -32,21 +30,34 @@ enum RayScatterModel {
 	XZ,
 }
 
+## Emitted when this node is enabled
+signal enabled
+## Emitted when this node is disabled
+signal disabled
+## Emitted when any configuration for the rays are changed
+## [br]This includes: [member rays_count], [member max_raycast_dist], [member max_bounces], and [member ray_scatter_model]
+signal ray_configuration_changed
+
 ## List of rays instanced by this node
-var rays: Array[_AudioRay] = []
+var rays: Array[AudioRay] = []
 
 ## Enable or disable raycasting
+## [br]Disabled nodes can't be updated (see [member update]) even if [member auto_update] is set to [code]true[/code]
 @export var is_enabled: bool = true:
 	set(v):
 		if is_enabled == v:
 			return
 		is_enabled = v
 
-		if is_node_ready():
-			if is_enabled:
+		if is_enabled:
+			if is_node_ready():
 				setup()
-			else:
+			enabled.emit()
+		else:
+			disabled.emit()
+			if is_node_ready():
 				clear()
+
 ## Whether to update automatically
 ## [br]If set to [code]true[/code], this [RaytracedAudioListener] will update every [i]process[/i] frame
 @export var auto_update: bool = true:
@@ -57,6 +68,12 @@ var rays: Array[_AudioRay] = []
 ## Number of rays to use
 ## [br]More rays and more bounces mean a more accurate model of the environment can be made
 ## [br] See also [member max_bounces]
+## [br]
+## [br][i]Technical note[/i]:
+## [br] Because the rays need to gather different informations about the environment,
+## [br] the actual number of processed rays can go up to:
+## [br] [code]rays_count * 3[/code]
+## [br] ([code]rays_count * (1 ray that bounces around + 1 echo ray + 1 muffle ray)[/code])
 @export var rays_count: int = 4:
 	set(v):
 		if v == rays_count:
@@ -64,24 +81,28 @@ var rays: Array[_AudioRay] = []
 		rays_count = maxi(v, 1)
 		clear()
 		setup()
+		ray_configuration_changed.emit()
 
 ## The maximum distance which any given ray instanced by this node will cast
 @export var max_raycast_dist: float = SPEED_OF_SOUND:
 	set(v):
 		max_raycast_dist = v
-		update_ray_configuration()
+		_update_ray_configuration()
+		ray_configuration_changed.emit()
 ## [br]More rays and more bounces mean a more accurate model of the environment can be made
 ## [br] See also [member rays_count]
 @export var max_bounces: int = 3:
 	set(v):
 		max_bounces = v
-		update_ray_configuration()
+		_update_ray_configuration()
+		ray_configuration_changed.emit()
 
 ## Controls how rays will be instanced
 @export var ray_scatter_model: RayScatterModel = RayScatterModel.RANDOM:
 	set(v):
 		ray_scatter_model = v
-		update_ray_configuration()
+		_update_ray_configuration()
+		ray_configuration_changed.emit()
 
 @export_category("Muffle")
 ## Enables [RaytracedAudioPlayer3D]s muffling behind walls
@@ -125,7 +146,7 @@ var room_size: float = 0.0
 ## How "outside" this [RaytracedAudioListener] is based on data gathered from rays, between 0 and 1
 var ambience: float = 0.0
 ## The direction to "outside" based on data gathered from rays
-## Should average out to 0 when this [RaytracedAudioListener] is completely outside
+## [br]Should average out to 0 when this [RaytracedAudioListener] is completely outside
 var ambient_dir: Vector3 = Vector3.ZERO
 
 var _reverb_effect: AudioEffectReverb
@@ -169,7 +190,7 @@ func _ready() -> void:
 ## Initiates this [RaytracedAudioListener]'s rays
 func setup() -> void:
 	for __ in rays_count:
-		var rc: _AudioRay = _AudioRay.new(max_raycast_dist, max_bounces)
+		var rc: AudioRay = AudioRay.new(max_raycast_dist, max_bounces)
 		rc.set_scatter_model(ray_scatter_model)
 		add_child(rc, INTERNAL_MODE_BACK)
 		rays.push_back(rc)
@@ -177,7 +198,7 @@ func setup() -> void:
 
 ## Clears all created rays
 func clear():
-	for ray: _AudioRay in rays:
+	for ray: AudioRay in rays:
 		remove_child(ray)
 		ray.queue_free()
 	rays.clear()
@@ -204,7 +225,7 @@ func update():
 	var escaped_strength: float = 0.0
 
 	# Gather data
-	for ray: _AudioRay in rays:
+	for ray: AudioRay in rays:
 		ray.update()
 
 		echo += ray.echo_dist
@@ -230,7 +251,7 @@ func update():
 
 
 func _update_muffle() -> void:
-	for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.GROUP_NAME):
+	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.GROUP_NAME):
 		player.update(self)
 
 
@@ -267,10 +288,8 @@ func _update_ambient(escaped_strength: float, escaped_dir: Vector3) -> void:
 
 
 # ✨ the name says it all ✨
-func update_ray_configuration() -> void:
-	for ray: _AudioRay in rays:
+func _update_ray_configuration() -> void:
+	for ray: AudioRay in rays:
 		ray.cast_dist = max_raycast_dist
 		ray.max_bounces = max_bounces
 		ray.set_scatter_model(ray_scatter_model)
-
-

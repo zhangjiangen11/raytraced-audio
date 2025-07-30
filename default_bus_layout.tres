@@ -1,9 +1,11 @@
 [gd_resource type="AudioBusLayout" load_steps=3 format=3 uid="uid://dfuwe48pov8j3"]
 
 [sub_resource type="AudioEffectReverb" id="AudioEffectReverb_j3pel"]
+resource_name = "reverb"
 hipass = 1.0
 
 [sub_resource type="AudioEffectPanner" id="AudioEffectPanner_g28q7"]
+resource_name = "pan"
 
 [resource]
 bus/1/name = &"RaytracedReverb"
