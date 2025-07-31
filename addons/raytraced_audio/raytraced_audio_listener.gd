@@ -1,7 +1,8 @@
 class_name RaytracedAudioListener extends AudioListener3D
 ## 3D audio listener for raytraced audio
 ##
-## This plugin creates 2 new audio buses for you to use across your project:
+## [b]Audio buses[/b]
+## [br]This plugin creates 2 new audio buses for you to use across your project:
 ## a [i]"Reverb"[/i] bus, and an [i]"Ambient"[/i] bus.
 ## [br]Note: both buses' names can be changed under [code]Project Settings > Raytraced Audio[/code].
 ## [br]
@@ -11,10 +12,13 @@ class_name RaytracedAudioListener extends AudioListener3D
 ## [br]The ambient bus controls the strength and pan of sounds coming from outside.
 ## [br]For example, in a room with a single opening leading outisde, sounds in this bus will appear to come from that opening, and will fade based on the player's distance to it
 ## [br]
-## [br]Note: There should be only one [RaytracedAudioListener] in a given scene.
+## [br][b]Performace[/b]
+## [br]Raytraced Audio adds 2 performance monitors:
+## [br] - [code]raytraced_audio/raycast_updates[/code]: How many raycast updates happened in one update tick
+## [br] - [code]raytraced_audio/enabled_players_count[/code]: How many [RaytracedAudioPlayer3D]s are enabled in the scene
+## [br]
+## [br]Note: There should be only one [RaytracedAudioListener] in a given scene, just like how there should be only one AudioListener3D in a scene.
 ## [br]See also [RaytracedAudioPlayer3D]
-
-# TODO: debugging tools
 
 ## Speed of sound in m/s
 const SPEED_OF_SOUND: float = 343.0
@@ -42,7 +46,7 @@ signal ray_configuration_changed
 var rays: Array[AudioRay] = []
 
 ## Enable or disable raycasting
-## [br]Disabled nodes can't be updated (see [member update]) even if [member auto_update] is set to [code]true[/code]
+## [br]Disabled nodes can't be updated (see [method update]) even if [member auto_update] is set to [code]true[/code]
 @export var is_enabled: bool = true:
 	set(v):
 		if is_enabled == v:
@@ -71,9 +75,9 @@ var rays: Array[AudioRay] = []
 ## [br]
 ## [br][i]Technical note[/i]:
 ## [br] Because the rays need to gather different informations about the environment,
-## [br] the actual number of processed rays can go up to:
-## [br] [code]rays_count * 3[/code]
-## [br] ([code]rays_count * (1 ray that bounces around + 1 echo ray + 1 muffle ray)[/code])
+##  the actual number of processed rays can go up to:
+## [br] [code]rays_count * (2 + n)[/code] where [code]n[/code] is the number of enabled [RaytracedAudioPlayer3D]s in the scene
+## [br] ([code]rays_count * (1 ray that bounces around + 1 echo ray + 1 muffle ray per enabled RaytracedAudioPlayer3D[/code])
 @export var rays_count: int = 4:
 	set(v):
 		if v == rays_count:
@@ -149,6 +153,10 @@ var ambience: float = 0.0
 ## [br]Should average out to 0 when this [RaytracedAudioListener] is completely outside
 var ambient_dir: Vector3 = Vector3.ZERO
 
+## For debugging purposes
+## [br]See the [code]raytraced_audio/raycast_updates[/code] performance monitor
+var ray_casts_this_tick: int = 0
+
 var _reverb_effect: AudioEffectReverb
 var _pan_effect: AudioEffectPanner
 
@@ -181,9 +189,17 @@ func _ready() -> void:
 	if is_enabled:
 		make_current()
 
-	# TODO: debugging tools
-	# Performance.add_custom_monitor(&"raycast_audio/ambience", func(): return ambience)
-	# Performance.add_custom_monitor(&"raycast_audio/echo_room_size", func(): return room_size)
+	_setup_debug()
+
+
+func _setup_debug() -> void:
+	Performance.add_custom_monitor(&"raytraced_audio/raycast_updates", func():
+		return ray_casts_this_tick
+	)
+
+	Performance.add_custom_monitor(&"raytraced_audio/enabled_players_count", func():
+		return get_tree().get_node_count_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME)
+	)
 	
 
 
@@ -214,6 +230,7 @@ func _process(delta: float) -> void:
 ## Updates this [RaytracedAudioListener]
 ## [br]If you are updating this node manually (i.e. [member auto_update] is [code]false[/code]), this is the method to call
 func update():
+	ray_casts_this_tick = 0
 	if !is_enabled:
 		return
 
@@ -227,6 +244,7 @@ func update():
 	# Gather data
 	for ray: AudioRay in rays:
 		ray.update()
+		ray_casts_this_tick += ray.ray_casts_this_tick
 
 		echo += ray.echo_dist
 		echo_count += ray.echo_count

@@ -12,7 +12,7 @@ class_name RaytracedAudioPlayer3D extends AudioStreamPlayer3D
 ## [br]Currently, there is no way to muffle only one audio player (or apply any effect for that matter).
 ## [br]So we create a new bus for every audio player that is audible from the [RaytracedAudioListener]
 ## [br]Godot doesn't provide methods to calculate the volume of an audio at certain distances, so we calculate
-## that ourselves (see [member calculate_audible_distance_threshold()])
+## that ourselves (see [method calculate_audible_distance_threshold()])
 
 ## All [RaytracedAudioPlayer3D]s (regardless of state) will be in this group
 const GROUP_NAME: StringName = &"raytraced_audio_player_3d"
@@ -44,7 +44,7 @@ signal audible_distance_updated(distance: float)
 ## [br]The distance at which this node is no longer considered audible is automatically stored inside [member AudioStreamPlayer3D.max_distance]
 ## (if not already set), also to save resources
 ## [br]Though, setting [member AudioStreamPlayer3D.max_distance] doesn't update this field automatically
-## [br]See also [member get_volume_db_from_pos] and [member calculate_audible_distance_threshold]
+## [br]See also [method get_volume_db_from_pos] and [method calculate_audible_distance_threshold]
 @export var audibility_threshold_db: float = -30.0:
 	set(v):
 		audibility_threshold_db = v
@@ -70,7 +70,7 @@ func _ready() -> void:
 
 ## Enables this node
 ## [br]Note: you should almost never have to worry about enabling / disabling [RaytracedAudioPlayer3D]s manually
-## [br]See [member update]
+## [br]See [method update]
 func enable():
 	if _is_enabled:
 		return
@@ -81,13 +81,9 @@ func enable():
 
 	enabled.emit()
 
-	# if DEBUG:
-	# 	DebugLabel.new(self, str(name, " (RaytracedAudioPlayer3D)"))\
-	# 		.with_name_replace("debuglabel")
-
 ## Enables this node
 ## [br]Note: you should almost never have to worry about enabling / disabling [RaytracedAudioPlayer3D]s manually
-## [br]See [member update]
+## [br]See [method update]
 func disable():
 	if !_is_enabled:
 		return
@@ -108,9 +104,6 @@ func _disable():
 	_lowpass_rays_count = 0
 
 	disabled.emit()
-
-	# if DEBUG:
-	# 	DebugLabel.remove_label(self, "debuglabel")
 
 
 # Returns the index of the created bus

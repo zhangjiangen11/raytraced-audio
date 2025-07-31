@@ -4,9 +4,6 @@ extends RayCast3D
 # shhhhhh its okay
 # ( -  ͜ʖ -)☞(ʘ_ʘ; )
 
-const _RaytracedAudioListener: Script = preload("res://addons/raytraced_audio/raytraced_audio_listener.gd")
-const _RaytracedAudioPlayer3D: Script = preload("res://addons/raytraced_audio/raytraced_audio_player_3d.gd")
-
 var cast_dist: float = 0.0
 var max_bounces: int = 1
 var ray_scatter: Callable
@@ -15,6 +12,7 @@ var echo_dist: float = 0.0
 var echo_count: int = 0
 var bounces: int = 0
 var has_bounced_this_tick: bool = false
+var ray_casts_this_tick: int = 0
 var escaped: bool = false
 var escape_dir: Vector3 = Vector3.ZERO
 
@@ -30,7 +28,7 @@ func _init(raycast_dist: float, max_bounce_count: int) -> void:
 
 func _enter_tree() -> void:
 	owner = get_parent()
-	assert(owner is _RaytracedAudioListener)
+	assert(owner is RaytracedAudioListener)
 
 
 func _ready() -> void:
@@ -45,6 +43,7 @@ func update():
 		reset()
 
 	force_raycast_update()
+	ray_casts_this_tick += 1
 	bounces += 1
 
 	# Escaped outside
@@ -52,7 +51,7 @@ func update():
 		escaped = true
 		global_position += target_position
 		# Muffle ray: Check for line of sight with audio players
-		for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
+		for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
 			var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
 			player._lowpass_rays_count += int(has_line_of_sight)
 		return
@@ -65,7 +64,7 @@ func update():
 	has_bounced_this_tick = true
 
 	# Muffle ray: Check for line of sight with audio players
-	for player: _RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(_RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
+	for player: RaytracedAudioPlayer3D in get_tree().get_nodes_in_group(RaytracedAudioPlayer3D.ENABLED_GROUP_NAME):
 		var has_line_of_sight: bool = _cast_ray(player.global_position).is_empty()
 		player._lowpass_rays_count += int(has_line_of_sight)
 		# Same as:
@@ -98,18 +97,19 @@ func reset():
 	reset_tick_stats()
 
 
-# Called after this ray is done ticking
+# Called after this ray is done ticking, in RaytracedAudioListener
 func reset_tick_stats() -> void:
 	has_bounced_this_tick = false
+	ray_casts_this_tick = 0
 	echo_dist = 0.0
 	echo_count = 0
 
 
-func set_scatter_model(model: _RaytracedAudioListener.RayScatterModel) -> void:
+func set_scatter_model(model: RaytracedAudioListener.RayScatterModel) -> void:
 	match model:
-		_RaytracedAudioListener.RayScatterModel.RANDOM:
+		RaytracedAudioListener.RayScatterModel.RANDOM:
 			ray_scatter = _random_dir
-		_RaytracedAudioListener.RayScatterModel.XZ:
+		RaytracedAudioListener.RayScatterModel.XZ:
 			ray_scatter = _random_dir_xz_plane
 		_:
 			push_error("Unknown ray scatter model: '", model, "'")
@@ -123,6 +123,7 @@ func _cast_ray(to: Vector3) -> Dictionary:
 		to,
 		0b01
 	)
+	ray_casts_this_tick += 1
 	return _space_state.intersect_ray(params)
 
 
