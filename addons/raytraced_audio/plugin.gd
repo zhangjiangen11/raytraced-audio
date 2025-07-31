@@ -67,7 +67,7 @@ func _setup_audio_buses() -> void:
 	AudioServer.add_bus_effect(i, panner)
 
 	# There's a bug in Godot that makes it so the ambient bus doesnt show properly in the editor
-	# This is "fixable" by adding a temporary bus afterwards and deleting it immediately because ofc
+	# This is "fixable" by adding a temporary bus afterwards and deleting it immediately because ofc.
 	# fuck you (respectfully)
 	i = AudioServer.bus_count
 	AudioServer.add_bus()
