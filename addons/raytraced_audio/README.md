@@ -31,3 +31,13 @@ That is:
 Raytraced Audio also adds 2 performance monitors:
  - `raytraced_audio/raycast_updates`: How many raycast updates happened in the update tick
  - `raytraced_audio/enabled_players_count`: How many `RaytracedAudioPlayer3D`s are currently enabled in the scene
+
+
+### Installation
+
+#### Manual installation
+
+- Download or clone this repository
+- Copy the `addons/raytraced_audio` folder into your project's `addons/` folder
+- Enable the plugin in `Project Settings > Plugins > Raytraced Audio`
+
