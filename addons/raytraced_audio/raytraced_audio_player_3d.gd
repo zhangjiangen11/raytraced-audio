@@ -87,8 +87,13 @@ func enable():
 func disable():
 	if !_is_enabled:
 		return
-	assert(bus != ProjectSettings.get_setting("raytraced_audio/reverb_bus"))
+
+	# Don't remove the fallback bus lol
+	if bus == ProjectSettings.get_setting("raytraced_audio/reverb_bus"):
+		_disable()
+		return
 	
+	# Remove this node's specific bus
 	var idx: int = AudioServer.get_bus_index(bus)
 	if idx == -1:
 		push_warning("audio bus ", bus, " not found")
@@ -142,6 +147,10 @@ func update(listener: RaytracedAudioListener) -> void:
 
 
 func _update(rays_count: int, interpolation: float):
+	if bus == ProjectSettings.get_setting("raytraced_audio/reverb_bus"):
+		_disable()
+		return
+
 	var idx: int = AudioServer.get_bus_index(bus)
 	if idx == -1:
 		push_error("audio bus ", bus, " not found")
