@@ -1,6 +1,8 @@
 # raytraced-audio
 Adds procedural audio effects to Godot like echo, ambient outdoor sounds, and muffle.
 
+[Showcase Video](https://youtu.be/rFauZQ-tFTg?si=eUklNxLSs8ew2Zp6)
+
 Check out [this amazing video](https://youtu.be/u6EuAUjq92k?si=6W-sGozYBQITEgQo) by **Vercidium** for insights on how this works!
 
 No need to create and maintain zones while creating levels, just put the `RaytracedAudioListener` node in your scene and most features will be available for you to use!
